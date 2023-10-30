@@ -1,0 +1,10 @@
+== pytest-gitbark
+
+A pytest plugin to test rules and commands in gitbark.
+
+=== Installation
+Currently, `pytest-gitbark` can only be installed from source using pip (or a equivalent):
+```
+pip install "git+https://github.com/YubicoLabs/pytest-gitbark.git"
+
+```
