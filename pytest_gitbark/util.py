@@ -3,7 +3,7 @@ from gitbark.objects import BarkRules
 from gitbark.core import BARK_RULES, BARK_RULES_BRANCH
 from gitbark.git import BARK_CONFIG, COMMIT_RULES
 
-from typing import Any
+from typing import Any, Callable, Optional
 from dataclasses import asdict
 from contextlib import contextmanager
 
@@ -11,6 +11,7 @@ import os
 import shutil
 import stat
 import yaml
+import pytest
 
 MAIN_BRANCH = "main"
 
@@ -142,3 +143,50 @@ def uninstall_hooks(repo: Repo):
                 current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
             )
             os.chmod(hook_path, new_permissions)
+
+
+@contextmanager
+def on_dir(dir: str):
+    curr_dir = os.getcwd()
+    os.chdir(dir)
+    try:
+        yield
+    finally:
+        os.chdir(curr_dir)
+
+
+def verify_rules(
+    repo: Repo,
+    passes: bool,
+    action: Callable[[Repo], None],
+    commit_rules: Optional[dict] = None,
+    bark_rules: Optional[dict] = None,
+) -> None:
+
+    if commit_rules:
+        repo.write_commit_rules(commit_rules)
+        repo.commit()
+
+    if bark_rules:
+        with repo.on_branch(BARK_RULES_BRANCH, True):
+            repo.write_bark_rules(bark_rules)
+            repo.commit()
+
+    verify_action(repo, passes, action)
+
+
+def verify_action(repo: Repo, passes: bool, action: Callable[[Repo], None]) -> None:
+    curr_head = repo.head
+
+    if passes:
+        action(repo)
+    else:
+        with pytest.raises(Exception):
+            action(repo)
+
+    post_head = repo.head
+
+    if passes:
+        assert curr_head != post_head
+    else:
+        assert curr_head == post_head
