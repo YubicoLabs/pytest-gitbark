@@ -1,7 +1,9 @@
 from gitbark.cli.__main__ import cli, _DefaultFormatter
 from gitbark.cli.util import CliFail
+from gitbark.git import Repository
+from gitbark.util import cmd
 
-from .util import Repo
+from .util import dump, restore_from_dump, MAIN_BRANCH
 
 from click.testing import CliRunner
 
@@ -34,14 +36,23 @@ def repo_dump(tmp_path_factory):
     repo_path = tmp_path_factory.mktemp("repo")
     dump_path = tmp_path_factory.mktemp("dump")
 
-    repo = Repo(repo_path)
+    # Init repo
+    cmd("git", "init", cwd=repo_path)
+    cmd("git", "checkout", "-b", MAIN_BRANCH, cwd=repo_path)
 
-    repo.dump(dump_path)
+    repo = Repository(repo_path)
+
+    # Init config
+    cmd("git", "config", "commit.gpgsign", "false", cwd=repo._path)
+    cmd("git", "config", "user.name", "Test", cwd=repo._path)
+    cmd("git", "config", "user.email", "test@test.com", cwd=repo._path)
+
+    dump(repo, dump_path)
     return repo, dump_path
 
 
 @pytest.fixture(scope="function")
-def repo(repo_dump: tuple[Repo, str]):
+def repo(repo_dump: tuple[Repository, str]):
     repo, dump_path = repo_dump
-    repo.restore_from_dump(dump_path)
+    restore_from_dump(repo, dump_path)
     return repo

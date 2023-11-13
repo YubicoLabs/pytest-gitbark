@@ -1,9 +1,9 @@
-from gitbark.util import cmd as _cmd
+from gitbark.util import cmd
 from gitbark.objects import BarkRules
-from gitbark.core import BARK_RULES, BARK_RULES_BRANCH
-from gitbark.git import BARK_CONFIG, COMMIT_RULES
+from gitbark.core import BARK_RULES, BARK_RULES_BRANCH, BARK_REQUIREMENTS
+from gitbark.git import BARK_CONFIG, COMMIT_RULES, Repository
 
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 from dataclasses import asdict
 from contextlib import contextmanager
 
@@ -16,115 +16,71 @@ import pytest
 MAIN_BRANCH = "main"
 
 
-class Repo:
-    def __init__(self, path: str) -> None:
-        self.path = path
-        if not os.path.exists(self.path):
-            os.makedirs(self.path)
+def write_bark_file(repo: Repository, file: str, content: str) -> None:
+    """Write and stage a bark file."""
+    bark_folder = f"{repo._path}/{BARK_CONFIG}"
+    if not os.path.exists(bark_folder):
+        os.mkdir(bark_folder)
 
-        self.init_repo()
-        self.init_config()
+    with open(file, "w") as f:
+        f.write(content)
 
-    def cmd(self, *cmd: str, check: bool = True, **kwargs: Any):
-        return _cmd(*cmd, check=check, cwd=self.path, **kwargs)
+    cmd("git", "add", file, cwd=repo._path)
 
-    @property
-    def head(self) -> str:
-        """Returns the commit the HEAD points to."""
-        return self.cmd("git", "rev-parse", "HEAD")[0]
 
-    @property
-    def active_branch(self) -> str:
-        """Returns the active branch."""
-        return self.cmd("git", "symbolic-ref", "--short", "HEAD")[0]
-
-    def init_repo(self) -> None:
-        """Initializes git in repo."""
-        self.cmd("git", "init")
-        self.cmd("git", "checkout", "-b", MAIN_BRANCH)
-
-    def init_config(self) -> None:
-        self.cmd("git", "config", "commit.gpgsign", "false")
-        self.set_user("Test", "test@test.com")
-        # TODO any other configs we want to disable?
-
-    def set_user(self, name: str, email: str) -> None:
-        self.cmd("git", "config", "user.name", name)
-        self.cmd("git", "config", "user.email", email)
-
-    def has_branch(self, branch: str) -> bool:
-        """Checks if a branch exists."""
-        _, exit_code = self.cmd("git", "show-ref", "-q", "--heads", branch, check=False)
-        if exit_code == 0:
-            return True
-        return False
-
-    def checkout(self, branch: str, orphan: bool = False) -> None:
-        """Checkouts a branch.
-
-        If a branch does not exist it will be created.
-        """
-        if not self.has_branch(branch):
-            if orphan:
-                self.cmd("git", "checkout", "--orphan", branch)
-            else:
-                self.cmd("git", "checkout", "-b", branch)
-        else:
-            self.cmd("git", "checkout", branch)
-
-    def commit(self, message: str = "Default msg", *options: str):
-        self.cmd("git", "commit", "-m", message, "--allow-empty", *options)
-
-    def write_bark_file(self, file: str, content: str) -> None:
-        """Write and stage a bark file."""
-        bark_folder = f"{self.path}/{BARK_CONFIG}"
-        if not os.path.exists(bark_folder):
-            os.mkdir(bark_folder)
-
-        with open(file, "w") as f:
-            f.write(content)
-
-        self.cmd("git", "add", file)
-
-    def write_bark_rules(self, bark_rules: BarkRules) -> None:
-        """Write and stage bark rules."""
-        if self.active_branch != BARK_RULES_BRANCH:
-            raise Exception(
-                f"Bark Rules should be created in the '{BARK_RULES_BRANCH}' branch!"
-            )
-        self.write_bark_file(
-            file=f"{self.path}/{BARK_RULES}",
-            content=yaml.safe_dump(asdict(bark_rules), sort_keys=False),
+def write_bark_rules(
+    repo: Repository, bark_rules: BarkRules, requirements: Optional[str] = None
+) -> None:
+    """Write and stage bark rules."""
+    write_bark_file(
+        repo=repo,
+        file=f"{repo._path}/{BARK_RULES}",
+        content=yaml.safe_dump(asdict(bark_rules), sort_keys=False),
+    )
+    if requirements:
+        write_bark_file(
+            repo=repo,
+            file=f"{repo._path}/{BARK_REQUIREMENTS}",
+            content=requirements,
         )
 
-    def write_commit_rules(self, commit_rules: dict) -> None:
-        """Write and stage commit rules."""
-        self.write_bark_file(
-            file=f"{self.path}/{COMMIT_RULES}",
-            content=yaml.safe_dump(commit_rules, sort_keys=False),
-        )
 
-    @contextmanager
-    def on_branch(self, branch: str, orphan_branch: bool = False):
-        curr_branch = self.active_branch
-        try:
-            self.checkout(branch, orphan_branch)
-            yield self
-        finally:
-            self.checkout(curr_branch)
+def write_commit_rules(repo: Repository, commit_rules: dict) -> None:
+    """Write and stage commit rules."""
+    write_bark_file(
+        repo=repo,
+        file=f"{repo._path}/{COMMIT_RULES}",
+        content=yaml.safe_dump(commit_rules, sort_keys=False),
+    )
 
-    def dump(self, dump_path: str) -> None:
-        shutil.copytree(self.path, dump_path, dirs_exist_ok=True)
 
-    def restore_from_dump(self, dump_path: str) -> None:
-        # Recreating the folders to ensure all files and folders are copied.
-        shutil.rmtree(self.path)
-        shutil.copytree(dump_path, self.path)
+def dump(repo: Repository, dump_path: str) -> None:
+    shutil.copytree(repo._path, dump_path, dirs_exist_ok=True)
+
+
+def restore_from_dump(repo: Repository, dump_path: str) -> None:
+    # Recreating the folders to ensure all files and folders are copied.
+    shutil.rmtree(repo._path)
+    shutil.copytree(dump_path, repo._path)
 
 
 @contextmanager
-def uninstall_hooks(repo: Repo):
-    hook_path = os.path.join(repo.path, ".git", "hooks", "reference-transaction")
+def on_branch(repo: Repository, branch: str, orhpan: bool = False):
+    curr_branch = repo.branch
+    if branch not in repo.branches:
+        if orhpan:
+            cmd("git", "checkout", "--orphan", branch, cwd=repo._path)
+        else:
+            cmd("git", "checkout", "-b", branch, cwd=repo._path)
+    try:
+        yield
+    finally:
+        cmd("git", "checkout", curr_branch, cwd=repo._path)
+
+
+@contextmanager
+def uninstall_hooks(repo: Repository):
+    hook_path = os.path.join(repo._path, ".git", "hooks", "reference-transaction")
     hook_content = None
     if os.path.exists(hook_path):
         with open(hook_path, "r") as f:
@@ -156,26 +112,28 @@ def on_dir(dir: str):
 
 
 def verify_rules(
-    repo: Repo,
+    repo: Repository,
     passes: bool,
-    action: Callable[[Repo], None],
+    action: Callable[[Repository], None],
     commit_rules: Optional[dict] = None,
     bark_rules: Optional[dict] = None,
 ) -> None:
 
     if commit_rules:
-        repo.write_commit_rules(commit_rules)
-        repo.commit()
+        write_commit_rules(repo, commit_rules)
+        cmd("git", "commit", "-m", "Add commit rules", cwd=repo._path)
 
     if bark_rules:
-        with repo.on_branch(BARK_RULES_BRANCH, True):
-            repo.write_bark_rules(bark_rules)
-            repo.commit()
+        with on_branch(repo, BARK_RULES_BRANCH, True):
+            write_bark_rules(repo, bark_rules)
+            cmd("git", "commit", "-m", "Add bark rules", cwd=repo._path)
 
     verify_action(repo, passes, action)
 
 
-def verify_action(repo: Repo, passes: bool, action: Callable[[Repo], None]) -> None:
+def verify_action(
+    repo: Repository, passes: bool, action: Callable[[Repository], None]
+) -> None:
     curr_head = repo.head
 
     if passes:
