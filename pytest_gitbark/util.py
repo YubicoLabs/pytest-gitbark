@@ -72,6 +72,8 @@ def on_branch(repo: Repository, branch: str, orhpan: bool = False):
             cmd("git", "checkout", "--orphan", branch, cwd=repo._path)
         else:
             cmd("git", "checkout", "-b", branch, cwd=repo._path)
+    else:
+        cmd("git", "checkout", branch, cwd=repo._path)
     try:
         yield
     finally:

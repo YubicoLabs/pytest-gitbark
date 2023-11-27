@@ -1,5 +1,5 @@
 from gitbark.cli.__main__ import cli, _DefaultFormatter
-from gitbark.cli.util import CliFail
+from gitbark.cli.util import CliFail, _add_subcommands
 from gitbark.git import Repository
 from gitbark.util import cmd
 
@@ -23,6 +23,7 @@ def _bark_cli(*argv, **kwargs):
     logging.getLogger().addHandler(handler)
 
     runner = CliRunner(mix_stderr=True)
+    _add_subcommands(cli)
     result = runner.invoke(cli, argv, obj={}, **kwargs)
     if result.exit_code != 0:
         if isinstance(result.exception, CliFail):
